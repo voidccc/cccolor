@@ -1,0 +1,217 @@
+#!/usr/bin/env python
+# Copyright 2014, Voidccc.  All rights reserved.
+# Use of this source code is governed by a MIT-style license
+# Author: voidccc (http://blog.csdn.net/voidccc)
+
+# IP Header
+#  0 1 2 3 4 5 6 7 0 1 2 3 4 5 6 7 0 1 2 3 4 5 6 7 0 1 2 3 4 5 6 7
+# +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+# |Version|  IHL  |Type of Service|         Total Length          |
+# +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+# |        Identification         |Flags|     Fragment Offset     |
+# +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+# | Time to Live  |   Protocol    |        Header Chechsum        |
+# +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+# |                       Source IP Address                       |
+# +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+# |                     Destination IP Address                    |
+# +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+# |                      Options (if IHL > 5)                     |
+#
+# TCP Header
+#  0 1 2 3 4 5 6 7 0 1 2 3 4 5 6 7 0 1 2 3 4 5 6 7 0 1 2 3 4 5 6 7
+# +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+# |          Source Port          |       Destination Port        |
+# +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+# |                        Sequence Number                        |
+# +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+# |                     Acknowledgment Number (if ACK set)        |
+# +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+# | Offset|   no use  |U|A|P|R|S|F|           Window Size         |
+# +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+# |           Checksum            |  Urgent Pointer (if URG set)  |
+# +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+# |                    Options(if Offset > 5)                     |
+
+import sys
+import re
+import logging
+import struct
+
+# CRITICAL > ERROR > WARNING > INFO > DEBUG > NOTSET
+logging.basicConfig(level=logging.ERROR,
+                format='%(asctime)s %(filename)s[line:%(lineno)d] %(levelname)s %(message)s',
+                datefmt='%a, %d %b %Y %H:%M:%S')
+
+FIX_8BIT = 20
+ip_head_8bit = 0
+ip_total_8bit = 0
+tcp_head_8bit = 0
+
+# 0-9 ip fixed header
+# 10 ip option
+# 11-18 tcp fixed header
+# 19 tcp option
+# color list: 31=>red 32=>green 33=>yellow 34=>blue 35=>purple 36=>cyan
+color_conf = ['31', '31', '31', '31', '31', '31', '31', '31', '31', '31', '34',
+    '32', '32', '32', '32', '32', '32', '32', '32', '33']
+
+def addcolor(block, color):
+    color_format = '\033[%s;49;1m%s\033[39;49;0m'
+    return color_format % (color, block)
+
+def str2x(st):
+    str_list = []
+    for i, ch in enumerate(st):
+        str_list.append('\\x' * (i % 2 == 0) + ch)
+    return "".join(str_list)
+
+def make(item, param):
+    str_list = []
+    for i, m in enumerate(param):
+        str_list.append(item[m-3 : m+1] + " ")
+    return "".join(str_list)
+
+def addspace(list_no_space):
+    index = 0
+    m = {}
+    list_with_space = []
+    for i, item in enumerate(list_no_space):
+        for j, element in enumerate(item):
+            if (index + 1) % 4 == 0:
+                if m.get(i) is None:
+                    m[i] = [j] 
+                else:
+                    m[i].append(j)
+            index += 1
+
+        if m.get(i) is None:
+            list_with_space.append(item)
+        else:
+            list_with_space.append(make(item, m.get(i)))
+    return list_with_space 
+
+def getaddrstr(i):
+    return "%04x" % i
+            
+def printcolor(total_d, total_r):
+    widthmap = {'B':2, 'H':4, 'I':8}
+    data = str2x(total_d)
+    ip_opt_32bit = (ip_head_8bit - FIX_8BIT)/4
+    tcp_opt_32bit = (tcp_head_8bit - FIX_8BIT)/4
+    ipheadstr = 'BBHHHBBHII' + 'I' * ip_opt_32bit
+    tcpheadstr = 'HHIIHHHH' + 'I' * tcp_opt_32bit
+    datastr = 'B' * (ip_total_8bit - ip_head_8bit - tcp_head_8bit)
+    allstr = ipheadstr + tcpheadstr + datastr
+    s = struct.Struct('!' + allstr)
+    iptcp = s.unpack(data.decode("string-escape"))
+    
+    newiptcp = []
+    for i, m in enumerate(iptcp):
+         sss = ("%0" + str(widthmap[allstr[i]]) + "x") % m
+         newiptcp.append(sss)
+
+    logging.debug(newiptcp)
+    iptcpwithspace = addspace(newiptcp)
+    logging.debug(iptcpwithspace)
+
+    finished_4bit = 0
+
+    line_list = []
+    all_list = []
+    
+    ind = 0
+    for i, m in enumerate(iptcp):
+        if i < 10:
+            line_list.append(addcolor(iptcpwithspace[i], color_conf[i]))
+        elif i >= 10 and i < 10 + ip_opt_32bit:
+            line_list.append(addcolor(iptcpwithspace[i], color_conf[10]))
+        elif i >= 10 + ip_opt_32bit and i < 10 + ip_opt_32bit + 8:
+            line_list.append(addcolor(iptcpwithspace[i], color_conf[i + 1 - ip_opt_32bit]))
+        elif i >= 10 + ip_opt_32bit + 8 and i < 10 + ip_opt_32bit + 8 + tcp_opt_32bit:
+            line_list.append(addcolor(iptcpwithspace[i], color_conf[19]))
+        else:
+            line_list.append(iptcpwithspace[i])
+
+        finished_4bit += widthmap[allstr[i]]
+        if finished_4bit % 32 == 0 or finished_4bit == ip_total_8bit * 2:
+            right = total_r[ind*16 : (ind+1)*16]
+
+            if finished_4bit % 32 == 0:
+                spacenum = 0
+            else:
+                spacenum = (ind + 1) * 32 - ip_total_8bit * 2
+                spacenum = spacenum/4 * 5 + (spacenum % 4 != 0) * 3
+
+            oneline = "".join(line_list)
+            line_list = []
+            all_list.append("\t0x%s:  %s%s %s\n" % (getaddrstr(ind*16), oneline, " "*spacenum, right))
+            ind += 1
+    print "".join(all_list),
+
+def main():
+    status = "mid" # mid first data
+    total_data = ""
+    total_right = ""
+    reg_line = r'.{10}(.{39})  (.{1,16})'
+    line_num = 0
+
+    global FIX_8BIT
+    global ip_head_8bit
+    global ip_total_8bit
+    global tcp_head_8bit
+
+    while True:
+        try:
+            line = sys.stdin.readline()
+        except KeyboardInterrupt:
+            break
+
+        if not line:
+            break
+
+        if status == "mid":
+            print line,
+            line_num = 0
+            total_data = ""
+            total_right = ""
+            status = "first"
+        elif status == "first":
+            regdata = re.compile(reg_line).match(line)
+            total_data = regdata.group(1)
+            total_right = regdata.group(2)
+
+            strNoEmpty = regdata.group(1).replace(" ","")
+            newstr = str2x(strNoEmpty)
+            s = struct.Struct('!BBHHHBBH4s')
+            look = s.unpack(newstr.decode("string-escape"))
+            ip_head_8bit = (look[0] & 0x0f) * 4
+            ip_total_8bit = look[2]
+            status = "data"
+            line_num += 1
+        elif status == "data":
+            if (line_num + 1) * 16 < ip_total_8bit:
+                regdata = re.compile(reg_line).match(line)
+                total_data += regdata.group(1)
+                total_right += regdata.group(2)
+            else:
+                regdata = re.compile(reg_line).match(line)
+                total_data += regdata.group(1)
+                total_right += regdata.group(2)
+                total_data = total_data.replace(" ", "")
+
+                # step 1 get header length of tcp
+                tcphead = total_data[ip_head_8bit * 2 : ip_head_8bit * 2 + 32]
+                tcphead_hex = str2x(tcphead)
+                s = struct.Struct('!HH4s4sHH')
+                look = s.unpack(tcphead_hex.decode("string-escape"))
+                tcp_head_8bit = (look[4] >> 12) * 4
+        
+                # step 2 split and color
+                logging.debug(total_data)
+                printcolor(total_data, total_right)
+                status = "mid"
+            line_num += 1
+
+if __name__ == '__main__':
+    main()
